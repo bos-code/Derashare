@@ -5,8 +5,9 @@ import { WebSocketServer, WebSocket } from "ws";
 const PORT = Number(process.env.PORT || 8080);
 const MAX_TEXT_LENGTH = 50_000;
 const ROOM_GRACE_MS = 5 * 60 * 1000;
+const HEARTBEAT_MS = 25_000;
 
-type Client = WebSocket & { room?: string };
+type Client = WebSocket & { room?: string; alive?: boolean };
 type Room = { clients: Set<Client>; latestText: string; cleanup?: NodeJS.Timeout };
 const rooms = new Map<string, Room>();
 
@@ -47,20 +48,36 @@ function detach(ws: Client) {
   if (room.clients.size === 0) room.cleanup = setTimeout(() => { const current = rooms.get(code); if (current && current.clients.size === 0) rooms.delete(code); }, ROOM_GRACE_MS);
 }
 
+function handleMessage(ws: Client, raw: WebSocket.RawData) {
+  let data: any; try { data = JSON.parse(raw.toString()); } catch { send(ws, { type: "error", code: "BAD_JSON", message: "Invalid message." }); return; }
+  if (!data || typeof data !== "object" || typeof data.type !== "string") { send(ws, { type: "error", code: "BAD_JSON", message: "Invalid message." }); return; }
+  if (data.type === "create") { detach(ws); const code = generateRoomCode(); rooms.set(code, { clients: new Set(), latestText: "" }); joinRoom(ws, code, true); return; }
+  if (data.type === "join") { const code = String(data.room || ""); if (!/^\d{6}$/.test(code)) { send(ws, { type: "error", code: "BAD_ROOM", message: "Room codes contain exactly 6 digits." }); return; } detach(ws); joinRoom(ws, code); return; }
+  if (data.type === "text") {
+    if (!ws.room) { send(ws, { type: "error", code: "NOT_IN_ROOM", message: "Join a room before sending text." }); return; }
+    const text = typeof data.text === "string" ? data.text : "";
+    if (!text || text.length > MAX_TEXT_LENGTH) { send(ws, { type: "error", code: "BAD_TEXT", message: "Text must be between 1 and 50,000 characters." }); return; }
+    const room = rooms.get(ws.room); if (!room) return; room.latestText = text; relay(ws, { type: "text", text }); return;
+  }
+  if (["rtc-offer", "rtc-answer", "rtc-ice"].includes(data.type)) { if (!ws.room) return; relay(ws, data); return; }
+  send(ws, { type: "error", code: "UNKNOWN_TYPE", message: "Unknown request." });
+}
+
 wss.on("connection", (ws: Client) => {
+  ws.alive = true;
+  ws.on("pong", () => { ws.alive = true; });
   ws.on("message", (raw) => {
-    let data: any; try { data = JSON.parse(raw.toString()); } catch { send(ws, { type: "error", code: "BAD_JSON", message: "Invalid message." }); return; }
-    if (data.type === "create") { detach(ws); const code = generateRoomCode(); rooms.set(code, { clients: new Set(), latestText: "" }); joinRoom(ws, code, true); return; }
-    if (data.type === "join") { const code = String(data.room || ""); if (!/^\d{6}$/.test(code)) { send(ws, { type: "error", code: "BAD_ROOM", message: "Room codes contain exactly 6 digits." }); return; } detach(ws); joinRoom(ws, code); return; }
-    if (data.type === "text") {
-      if (!ws.room) { send(ws, { type: "error", code: "NOT_IN_ROOM", message: "Join a room before sending text." }); return; }
-      const text = typeof data.text === "string" ? data.text : "";
-      if (!text || text.length > MAX_TEXT_LENGTH) { send(ws, { type: "error", code: "BAD_TEXT", message: "Text must be between 1 and 50,000 characters." }); return; }
-      const room = rooms.get(ws.room); if (!room) return; room.latestText = text; relay(ws, { type: "text", text }); return;
-    }
-    if (["rtc-offer", "rtc-answer", "rtc-ice"].includes(data.type)) { if (!ws.room) return; relay(ws, data); return; }
-    send(ws, { type: "error", code: "UNKNOWN_TYPE", message: "Unknown request." });
+    try { handleMessage(ws, raw); } catch (err) { console.error("Failed to handle message", err); send(ws, { type: "error", code: "SERVER_ERROR", message: "Something went wrong." }); }
   });
   ws.on("close", () => detach(ws)); ws.on("error", () => detach(ws));
 });
+
+// Drop sockets that stop answering pings (e.g. a phone that lost signal) so they free their room slot.
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients as Set<Client>) {
+    if (!ws.alive) { detach(ws); ws.terminate(); continue; }
+    ws.alive = false; ws.ping();
+  }
+}, HEARTBEAT_MS);
+wss.on("close", () => clearInterval(heartbeat));
 httpServer.listen(PORT, "0.0.0.0", () => console.log(`Dera Share realtime server listening on ${PORT}`));
