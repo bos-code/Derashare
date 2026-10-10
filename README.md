@@ -28,6 +28,28 @@ npm run dev
 
 Open `http://localhost:3000`. The WebSocket server runs on port `8080`.
 
+### Checks
+
+These run in CI (`.github/workflows/ci.yml`) on every push to `main` and every pull request:
+
+```bash
+npm run format:check                     # Prettier, whole repo (npm run format to fix)
+npm --prefix server run typecheck        # server source and tests
+npm --prefix server test                 # server integration tests
+npm --prefix client run lint             # ESLint (Next.js rules)
+npm --prefix client run typecheck
+npm run build
+```
+
+### Layout
+
+- `server/src/realtime.ts`: room, relay, rate-limit and heartbeat logic (`createRealtimeServer`)
+- `server/src/index.ts`: reads environment variables and starts the server
+- `client/hooks/useRoomSocket.ts`: WebSocket connection, reconnects and room state
+- `client/hooks/usePeerTransfer.ts`: WebRTC negotiation and file transfer
+- `client/components/`: UI pieces composed by `client/app/page.tsx`
+- `client/lib/`: message types and file helpers
+
 ## Environment
 
 Copy `.env.example` to `client/.env.local`:
@@ -38,8 +60,28 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8080
 
 Production must use a secure `wss://` endpoint.
 
+Server environment variables (all optional):
+
+| Variable                            | Purpose                                                                                                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ALLOWED_ORIGINS`                   | Comma-separated frontend origins allowed to connect, e.g. `https://derashare.vercel.app`. Unset allows any origin, which is only appropriate for local development. |
+| `TRUST_PROXY`                       | Set to `1` behind a reverse proxy (Render, Railway) so rate limits use the client IP from `x-forwarded-for`.                                                        |
+| `MAX_ROOMS`                         | Maximum concurrent rooms. Defaults to `10000`.                                                                                                                      |
+| `TURN_URLS`                         | Comma-separated TURN URLs, e.g. `turn:turn.example.com:3478,turns:turn.example.com:5349`.                                                                           |
+| `TURN_SECRET`                       | Shared secret for coturn's `use-auth-secret` mode. Each device gets credentials that expire after 12 hours.                                                         |
+| `TURN_USERNAME` / `TURN_CREDENTIAL` | Fixed credentials instead of `TURN_SECRET`, e.g. from a hosted TURN provider.                                                                                       |
+
+Without TURN, files only transfer when the two devices can reach each other directly. That usually works on the same Wi-Fi and often fails between mobile networks. After 20 seconds without a connection the app says file sharing is unavailable; text keeps working through the server either way.
+
+## Security model
+
+- Room codes are short, so the server limits each IP to 15 create/join attempts per minute and each connection to 300 messages per 10 seconds.
+- Text is kept in server memory only while a device is in the room, and is cleared as soon as the room is empty.
+- Files go directly between devices over an encrypted WebRTC data channel and never touch the server.
+- Received files are only previewed when they are a known image type. Everything else is offered as a plain download.
+
 ## Deployment
 
-Deploy `client/` to Vercel. Deploy `server/` to a persistent Node.js host that supports WebSockets, such as Render or Railway. Set `NEXT_PUBLIC_WS_URL` on the frontend to the public WebSocket server URL.
+Deploy `client/` to Vercel. Deploy `server/` to a persistent Node.js host that supports WebSockets, such as Render or Railway. Set `NEXT_PUBLIC_WS_URL` on the frontend to the public WebSocket server URL, and set `ALLOWED_ORIGINS` on the server to the frontend URL.
 
 The server exposes `GET /health` for host health checks.

@@ -1,1 +1,24 @@
-{"name":"Dera Share","short_name":"Dera Share","description":"Send text instantly between two paired devices.","start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#111827"}
+{
+  "name": "Dera Share",
+  "short_name": "Dera Share",
+  "description": "Send text and files directly between two paired devices.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef0f3",
+  "theme_color": "#17191e",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  }
+}

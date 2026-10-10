@@ -1,1 +1,18 @@
-{"name":"derashare","private":true,"scripts":{"dev":"concurrently \"npm run dev:client\" \"npm run dev:server\"","dev:client":"npm --prefix client run dev","dev:server":"npm --prefix server run dev","build":"npm --prefix client run build && npm --prefix server run build","start:server":"npm --prefix server start","install:all":"npm install && npm --prefix client install && npm --prefix server install"},"devDependencies":{"concurrently":"^9.2.1"}}
+{
+  "name": "derashare",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "npm --prefix client run dev",
+    "dev:server": "npm --prefix server run dev",
+    "build": "npm --prefix client run build && npm --prefix server run build",
+    "start:server": "npm --prefix server start",
+    "install:all": "npm install && npm --prefix client install && npm --prefix server install",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "prettier": "^3.9.10"
+  }
+}

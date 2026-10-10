@@ -3,7 +3,16 @@ services:
     name: derashare-realtime
     runtime: node
     rootDir: server
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
+    envVars:
+      - key: TRUST_PROXY
+        value: "1"
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_SECRET
+        sync: false
