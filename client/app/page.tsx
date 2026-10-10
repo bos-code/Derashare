@@ -6,17 +6,20 @@ import { InviteCard } from "@/components/InviteCard";
 import { JoinPanel } from "@/components/JoinPanel";
 import { ReceivedText } from "@/components/ReceivedText";
 import { Sidebar } from "@/components/Sidebar";
+import { TextHistory } from "@/components/TextHistory";
 import { TextShare } from "@/components/TextShare";
 import { TransferList } from "@/components/TransferList";
 import { useNotify } from "@/hooks/useNotify";
 import { usePeerTransfer } from "@/hooks/usePeerTransfer";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
+import { useTextHistory } from "@/hooks/useTextHistory";
 import { useTheme } from "@/hooks/useTheme";
 
 export default function Home() {
   const [error, setError] = useState("");
   const { dark, toggleTheme } = useTheme();
   const { toast, notify, enableNotifications } = useNotify();
+  const history = useTextHistory();
 
   // The two hooks call into each other: the socket relays WebRTC signals to the peer connection,
   // and the peer connection sends its signals back out over the socket. The handlers below only
@@ -24,9 +27,15 @@ export default function Home() {
   const socket = useRoomSocket({
     onPeer: (connected) => peer.onPeer(connected),
     onSignal: (signal) => peer.handleSignal(signal),
-    onText: () => notify("New text received"),
+    onText: (text) => {
+      history.add("received", text);
+      notify("New text received");
+    },
     onDisconnect: () => peer.close(),
-    onLeave: () => peer.reset(),
+    onLeave: () => {
+      peer.reset();
+      history.clear();
+    },
     onError: setError,
   });
   const peer = usePeerTransfer({
@@ -57,6 +66,7 @@ export default function Home() {
 
   const sendText = (text: string) => {
     if (!socket.send({ type: "text", text })) return false;
+    history.add("sent", text);
     notify("Text sent");
     return true;
   };
@@ -121,6 +131,7 @@ export default function Home() {
               />
               <TransferList transfers={peer.transfers} onClear={peer.clearTransfers} />
               <ReceivedText text={socket.received} onError={setError} />
+              <TextHistory entries={history.entries} onError={setError} />
             </div>
           )}
           {error && (

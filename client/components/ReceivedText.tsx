@@ -20,7 +20,7 @@ export function ReceivedText({ text, onError }: Props) {
     <>
       <div className="receivedHead">
         <label>LATEST TEXT</label>
-        <span>{text ? "Received from your device" : "Nothing received yet"}</span>
+        <span>{text ? "Last text shared in this room" : "Nothing received yet"}</span>
       </div>
       <div className={`received ${!text ? "empty" : ""}`}>
         <pre>{text || "Incoming text will appear here."}</pre>

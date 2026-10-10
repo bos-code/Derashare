@@ -17,7 +17,7 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 export type RoomSocketHandlers = {
   onPeer: (connected: boolean) => void;
   onSignal: (signal: RtcSignal) => void;
-  onText: () => void;
+  onText: (text: string) => void;
   // The socket dropped: tear down the peer connection (a reconnect will negotiate a new one).
   onDisconnect: () => void;
   // The room was left or rejected: also clear any per-room state such as the last transfer.
@@ -106,7 +106,7 @@ export function useRoomSocket(handlers: RoomSocketHandlers) {
           h.onPeer(Boolean(data.connected));
         } else if (data.type === "text" && typeof data.text === "string") {
           setReceived(data.text);
-          h.onText();
+          h.onText(data.text);
         } else if ((data.type === "rtc-offer" || data.type === "rtc-answer") && data.sdp) {
           h.onSignal(data);
         } else if (data.type === "rtc-ice" && data.candidate) {
