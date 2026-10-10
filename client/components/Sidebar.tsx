@@ -12,6 +12,28 @@ type Props = {
   onLeave: () => void;
 };
 
+// Icon + label; on narrow screens only the icon shows, so the label doubles as the accessible name.
+function SideButton({
+  icon,
+  label,
+  className,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  className?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className={className} onClick={onClick} aria-label={label} title={label}>
+      <span className="icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="label">{label}</span>
+    </button>
+  );
+}
+
 export function Sidebar({
   status,
   room,
@@ -58,15 +80,15 @@ export function Sidebar({
         </div>
       )}
       <div className="sideActions">
-        <button onClick={onToggleTheme}>{dark ? "☀ Light mode" : "☾ Dark mode"}</button>
+        <SideButton
+          icon={dark ? "☀" : "☾"}
+          label={dark ? "Light mode" : "Dark mode"}
+          onClick={onToggleTheme}
+        />
         {"Notification" in globalThis && (
-          <button onClick={onEnableNotifications}>Notifications</button>
+          <SideButton icon="🔔" label="Notifications" onClick={onEnableNotifications} />
         )}
-        {room && (
-          <button className="danger" onClick={onLeave}>
-            Leave room
-          </button>
-        )}
+        {room && <SideButton icon="✕" label="Leave room" className="danger" onClick={onLeave} />}
       </div>
       <small className="privacy">
         Peer-to-peer files

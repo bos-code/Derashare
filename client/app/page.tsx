@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileDrop } from "@/components/FileDrop";
+import { InviteCard } from "@/components/InviteCard";
 import { JoinPanel } from "@/components/JoinPanel";
 import { ReceivedText } from "@/components/ReceivedText";
 import { Sidebar } from "@/components/Sidebar";
@@ -36,6 +37,22 @@ export default function Home() {
   });
 
   const { status, room, peerConnected } = socket;
+
+  // Opening a join link (/?room=123456, e.g. from the QR code) joins that room straight away.
+  const autoJoined = useRef(false);
+  const joinRoom = socket.join;
+  useEffect(() => {
+    if (autoJoined.current) return;
+    autoJoined.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("room");
+    if (!code) return;
+    params.delete("room");
+    const query = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+    if (/^\d{6}$/.test(code)) joinRoom(code);
+    else setError("That join link is invalid. Enter the 6-digit room code instead.");
+  }, [joinRoom]);
   const busy = status === "connecting" || status === "reconnecting";
 
   const sendText = (text: string) => {
@@ -92,6 +109,7 @@ export default function Home() {
                 </strong>
                 <span>{room}</span>
               </div>
+              {!peerConnected && <InviteCard room={room} onError={setError} />}
               <TextShare canSend={status === "connected"} onSend={sendText} onError={setError} />
               <div className="sectionLine">
                 <span>FILE TRANSFER</span>

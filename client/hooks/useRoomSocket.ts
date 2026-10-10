@@ -162,6 +162,9 @@ export function useRoomSocket(handlers: RoomSocketHandlers) {
     handlersRef.current.onError("");
   }, [resetRoom]);
 
+  const create = useCallback(() => connect({ type: "create" }), [connect]);
+  const join = useCallback((code: string) => connect({ type: "join", room: code }), [connect]);
+
   useEffect(
     () => () => {
       intentionalClose.current = true;
@@ -177,8 +180,8 @@ export function useRoomSocket(handlers: RoomSocketHandlers) {
     peerConnected,
     received,
     iceServers,
-    create: () => connect({ type: "create" }),
-    join: (code: string) => connect({ type: "join", room: code }),
+    create,
+    join,
     leave,
     send,
   };
