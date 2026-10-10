@@ -28,7 +28,10 @@ export function TextHistory({ entries, onError }: Props) {
         <span>Last {entries.length} · this session only</span>
       </div>
       {entries.map((entry) => (
-        <div key={entry.id} className={`historyItem ${entry.direction === "sent" ? "mine" : "theirs"}`}>
+        <div
+          key={entry.id}
+          className={`historyItem ${entry.direction === "sent" ? "mine" : "theirs"}`}
+        >
           <div className="historyMeta">
             <span>
               {entry.direction === "sent" ? "You sent" : "Received"} · {time(entry.at)}
