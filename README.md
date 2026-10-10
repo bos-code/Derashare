@@ -38,8 +38,23 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8080
 
 Production must use a secure `wss://` endpoint.
 
+Server environment variables (all optional):
+
+| Variable | Purpose |
+| --- | --- |
+| `ALLOWED_ORIGINS` | Comma-separated frontend origins allowed to connect, e.g. `https://derashare.vercel.app`. Unset allows any origin, which is only appropriate for local development. |
+| `TRUST_PROXY` | Set to `1` behind a reverse proxy (Render, Railway) so rate limits use the client IP from `x-forwarded-for`. |
+| `MAX_ROOMS` | Maximum concurrent rooms. Defaults to `10000`. |
+
+## Security model
+
+- Room codes are short, so the server limits each IP to 15 create/join attempts per minute and each connection to 300 messages per 10 seconds.
+- Text is kept in server memory only while a device is in the room, and is cleared as soon as the room is empty.
+- Files go directly between devices over an encrypted WebRTC data channel and never touch the server.
+- Received files are only previewed when they are a known image type. Everything else is offered as a plain download.
+
 ## Deployment
 
-Deploy `client/` to Vercel. Deploy `server/` to a persistent Node.js host that supports WebSockets, such as Render or Railway. Set `NEXT_PUBLIC_WS_URL` on the frontend to the public WebSocket server URL.
+Deploy `client/` to Vercel. Deploy `server/` to a persistent Node.js host that supports WebSockets, such as Render or Railway. Set `NEXT_PUBLIC_WS_URL` on the frontend to the public WebSocket server URL, and set `ALLOWED_ORIGINS` on the server to the frontend URL.
 
 The server exposes `GET /health` for host health checks.
