@@ -40,11 +40,11 @@ Production must use a secure `wss://` endpoint.
 
 Server environment variables (all optional):
 
-| Variable | Purpose |
-| --- | --- |
+| Variable          | Purpose                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ALLOWED_ORIGINS` | Comma-separated frontend origins allowed to connect, e.g. `https://derashare.vercel.app`. Unset allows any origin, which is only appropriate for local development. |
-| `TRUST_PROXY` | Set to `1` behind a reverse proxy (Render, Railway) so rate limits use the client IP from `x-forwarded-for`. |
-| `MAX_ROOMS` | Maximum concurrent rooms. Defaults to `10000`. |
+| `TRUST_PROXY`     | Set to `1` behind a reverse proxy (Render, Railway) so rate limits use the client IP from `x-forwarded-for`.                                                        |
+| `MAX_ROOMS`       | Maximum concurrent rooms. Defaults to `10000`.                                                                                                                      |
 
 ## Security model
 

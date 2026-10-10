@@ -2,35 +2,662 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Status="idle"|"connecting"|"connected"|"reconnecting"|"offline";
-type Transfer={name:string;size:number;progress:number;direction:"send"|"receive";url?:string;type?:string};
-type ServerMessage={type:string;room?:string;text?:string;peerConnected?:boolean;connected?:boolean;code?:string;message?:string;sdp?:RTCSessionDescriptionInit;candidate?:RTCIceCandidateInit};
-const WS_URL=process.env.NEXT_PUBLIC_WS_URL||"ws://localhost:8080",CHUNK=64*1024,MAX_FILE=500*1024*1024,MAX_RECONNECT_FULL=6;
+type Status = "idle" | "connecting" | "connected" | "reconnecting" | "offline";
+type Transfer = {
+  name: string;
+  size: number;
+  progress: number;
+  direction: "send" | "receive";
+  url?: string;
+  type?: string;
+};
+type ServerMessage = {
+  type: string;
+  room?: string;
+  text?: string;
+  peerConnected?: boolean;
+  connected?: boolean;
+  code?: string;
+  message?: string;
+  sdp?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+};
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080",
+  CHUNK = 64 * 1024,
+  MAX_FILE = 500 * 1024 * 1024,
+  MAX_RECONNECT_FULL = 6;
 // Only these image types may be previewed; everything else is stored as an opaque download so a peer can't
 // make the app render HTML/SVG from a same-origin blob: URL.
-const IMAGE_TYPES:Record<string,string>={png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",jfif:"image/jpeg",gif:"image/gif",webp:"image/webp",bmp:"image/bmp",avif:"image/avif"},PREVIEWABLE=new Set(Object.values(IMAGE_TYPES));
-function safeFileType(name:string,type:unknown){if(typeof type==="string"&&PREVIEWABLE.has(type))return type;if(!type){const ext=name.split(".").pop()?.toLowerCase()||"";if(IMAGE_TYPES[ext])return IMAGE_TYPES[ext]}return"application/octet-stream"}
-export default function Home(){
- const [status,setStatus]=useState<Status>("idle"),[room,setRoom]=useState(""),[roomInput,setRoomInput]=useState(""),[draft,setDraft]=useState(""),[received,setReceived]=useState(""),[peerConnected,setPeerConnected]=useState(false),[error,setError]=useState(""),[copied,setCopied]=useState(false),[transfer,setTransfer]=useState<Transfer|null>(null),[rtcReady,setRtcReady]=useState(false),[toast,setToast]=useState(""),[dark,setDark]=useState(false);
- const socketRef=useRef<WebSocket|null>(null),desiredAction=useRef<{type:"create"|"join";room?:string}|null>(null),reconnectTimer=useRef<ReturnType<typeof setTimeout>|null>(null),intentionalClose=useRef(false),pcRef=useRef<RTCPeerConnection|null>(null),channelRef=useRef<RTCDataChannel|null>(null),incoming=useRef<{meta?:any;chunks:ArrayBuffer[];received:number}>({chunks:[],received:0}),fileInput=useRef<HTMLInputElement|null>(null),pendingIce=useRef<RTCIceCandidateInit[]>([]),reconnectAttempts=useRef(0),sendChain=useRef<Promise<void>>(Promise.resolve());
- useEffect(()=>{const saved=localStorage.getItem("dera-theme");setDark(saved?saved==="dark":matchMedia("(prefers-color-scheme: dark)").matches)},[]);
- const toggleTheme=()=>setDark(v=>{localStorage.setItem("dera-theme",!v?"dark":"light");return !v});
- const notify=useCallback((body:string)=>{setToast(body);setTimeout(()=>setToast(""),2600);if(document.hidden&&"Notification"in window&&Notification.permission==="granted")new Notification("Dera Share",{body});if("vibrate"in navigator)navigator.vibrate(80)},[]);
- const sendSignal=(data:object)=>{if(socketRef.current?.readyState===WebSocket.OPEN)socketRef.current.send(JSON.stringify(data))};
- const bindChannel=useCallback((ch:RTCDataChannel)=>{channelRef.current=ch;ch.binaryType="arraybuffer";ch.onopen=()=>{setRtcReady(true);setError("")};ch.onclose=()=>setRtcReady(false);ch.onmessage=e=>{const fail=(message:string)=>{incoming.current={chunks:[],received:0};setTransfer(null);setError(message)};if(typeof e.data==="string"){let msg:any;try{msg=JSON.parse(e.data)}catch{return}if(msg?.kind==="file-meta"){const size=Number(msg.size);if(!Number.isFinite(size)||size<0||size>MAX_FILE){fail("An incoming file was rejected because it is larger than 500 MB.");return}const name=(typeof msg.name==="string"&&msg.name.trim()?msg.name:"file").slice(0,255),fileType=safeFileType(name,msg.fileType);incoming.current={meta:{name,size,fileType},chunks:[],received:0};setTransfer({name,size,progress:0,direction:"receive",type:fileType})}if(msg?.kind==="file-end"){const i=incoming.current;if(!i.meta)return;if(i.received!==i.meta.size){fail(`${i.meta.name} arrived incomplete. Ask the sender to try again.`);return}const blob=new Blob(i.chunks,{type:i.meta.fileType}),url=URL.createObjectURL(blob);incoming.current={chunks:[],received:0};setTransfer({name:i.meta.name,size:i.meta.size,progress:100,direction:"receive",url,type:i.meta.fileType});notify(`${i.meta.name} received`)}}else{const i=incoming.current;if(!i.meta)return;if(i.received+e.data.byteLength>i.meta.size){fail(`${i.meta.name} was larger than announced and was discarded.`);return}i.chunks.push(e.data);i.received+=e.data.byteLength;setTransfer({name:i.meta.name,size:i.meta.size,progress:Math.min(99,Math.round(i.received/Math.max(1,i.meta.size)*100)),direction:"receive",type:i.meta.fileType})}}},[notify]);
- const makePeer=useCallback(()=>{pcRef.current?.close();pendingIce.current=[];const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]});pcRef.current=pc;pc.onicecandidate=e=>{if(e.candidate)sendSignal({type:"rtc-ice",candidate:e.candidate.toJSON()})};pc.ondatachannel=e=>bindChannel(e.channel);pc.onconnectionstatechange=()=>{if(["failed","disconnected","closed"].includes(pc.connectionState))setRtcReady(false)};return pc},[bindChannel]);
- const flushIce=async(pc:RTCPeerConnection)=>{for(const c of pendingIce.current.splice(0))try{await pc.addIceCandidate(c)}catch{}};
- const startOffer=useCallback(async()=>{try{const pc=makePeer(),ch=pc.createDataChannel("files",{ordered:true});bindChannel(ch);const offer=await pc.createOffer();await pc.setLocalDescription(offer);sendSignal({type:"rtc-offer",sdp:offer})}catch{setError("Could not prepare peer-to-peer file sharing.")}},[bindChannel,makePeer]);
- const resetRoom=useCallback(()=>{desiredAction.current=null;reconnectAttempts.current=0;setRoom("");setRoomInput("");setReceived("");setPeerConnected(false);setRtcReady(false);setTransfer(null);setStatus("idle")},[]);
- const connect=useCallback((action:{type:"create"|"join";room?:string},reconnect=false)=>{if(reconnectTimer.current){clearTimeout(reconnectTimer.current);reconnectTimer.current=null}const old=socketRef.current;if(old){old.onopen=old.onmessage=old.onclose=old.onerror=null;if(old.readyState<=WebSocket.OPEN)old.close()}desiredAction.current=action;intentionalClose.current=false;setError("");setStatus(reconnect?"reconnecting":"connecting");const socket=new WebSocket(WS_URL);socketRef.current=socket;socket.onopen=()=>socket.send(JSON.stringify(action));socket.onmessage=async event=>{if(socketRef.current!==socket)return;let data:ServerMessage;try{data=JSON.parse(event.data)}catch{return}if(data.type==="created"&&data.room){reconnectAttempts.current=0;setRoom(data.room);setRoomInput(data.room);setStatus("connected");desiredAction.current={type:"join",room:data.room}}else if(data.type==="joined"&&data.room){reconnectAttempts.current=0;setRoom(data.room);setRoomInput(data.room);setStatus("connected");setPeerConnected(Boolean(data.peerConnected));if(data.text)setReceived(data.text);desiredAction.current={type:"join",room:data.room}}else if(data.type==="peer"){setPeerConnected(Boolean(data.connected));if(data.connected)setTimeout(()=>startOffer(),250);else{setRtcReady(false);pcRef.current?.close()}}else if(data.type==="text"&&typeof data.text==="string"){setReceived(data.text);notify("New text received")}else if(data.type==="rtc-offer"&&data.sdp){try{const pc=makePeer();await pc.setRemoteDescription(data.sdp);await flushIce(pc);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);sendSignal({type:"rtc-answer",sdp:answer})}catch{setError("File connection negotiation failed. Rejoin and try again.")}}else if(data.type==="rtc-answer"&&data.sdp&&pcRef.current){try{await pcRef.current.setRemoteDescription(data.sdp);await flushIce(pcRef.current)}catch{setError("File connection negotiation failed.")}}else if(data.type==="rtc-ice"&&data.candidate){const pc=pcRef.current;if(!pc||!pc.remoteDescription)pendingIce.current.push(data.candidate);else try{await pc.addIceCandidate(data.candidate)}catch{}}else if(data.type==="error"){const roomError=data.code==="ROOM_FULL"||data.code==="ROOM_NOT_FOUND"||data.code==="BAD_ROOM";if(data.code==="ROOM_FULL"&&reconnectAttempts.current>0&&reconnectAttempts.current<MAX_RECONNECT_FULL){socket.close();return}setError(data.message||"Something went wrong.");if(roomError){intentionalClose.current=true;socket.close();resetRoom()}}};socket.onclose=()=>{if(socketRef.current!==socket||intentionalClose.current)return;setPeerConnected(false);setRtcReady(false);pcRef.current?.close();const action=desiredAction.current;if(action?.room){setStatus("reconnecting");const delay=Math.min(30000,1000*2**reconnectAttempts.current++);reconnectTimer.current=setTimeout(()=>connect(action,true),delay)}else setStatus("offline")};socket.onerror=()=>{if(socketRef.current===socket)setError("Could not reach the Dera Share server.")}},[makePeer,notify,resetRoom,startOffer]);
- useEffect(()=>()=>{intentionalClose.current=true;if(reconnectTimer.current)clearTimeout(reconnectTimer.current);socketRef.current?.close();pcRef.current?.close()},[]);
- useEffect(()=>()=>{if(transfer?.url)URL.revokeObjectURL(transfer.url)},[transfer?.url]);
- const busy=status==="connecting"||status==="reconnecting",createRoom=()=>{if(!busy)connect({type:"create"})},joinRoom=()=>{if(busy)return;const code=roomInput.replace(/\D/g,"").slice(0,6);if(code.length!==6){setError("Enter a 6-digit room code.");return}connect({type:"join",room:code})};
- const sendText=()=>{if(!draft.trim()||socketRef.current?.readyState!==WebSocket.OPEN)return;sendSignal({type:"text",text:draft});setDraft("");notify("Text sent")};
- async function paste(){try{setDraft(await navigator.clipboard.readText())}catch{setError("Clipboard permission was blocked. Paste manually.")}}async function copy(){if(!received)return;try{await navigator.clipboard.writeText(received);setCopied(true);setTimeout(()=>setCopied(false),1200)}catch{setError("Could not copy automatically.")}}async function enableNotifications(){if("Notification"in window){const p=await Notification.requestPermission();notify(p==="granted"?"Notifications enabled":"Notifications were not enabled")}}
- async function sendOne(file:File){const ch=channelRef.current;if(!ch||ch.readyState!=="open"){setError("File transfer is not ready yet. Wait until Files ready appears.");return}if(file.size>MAX_FILE){setError(`${file.name} is larger than the 500 MB limit.`);return}setError("");setTransfer({name:file.name,size:file.size,progress:0,direction:"send",type:file.type});try{ch.send(JSON.stringify({kind:"file-meta",name:file.name,size:file.size,fileType:file.type}));let offset=0;while(offset<file.size){while(ch.bufferedAmount>4*1024*1024){if(ch.readyState!=="open")throw new Error("closed");await new Promise(r=>setTimeout(r,40))}const buf=await file.slice(offset,offset+CHUNK).arrayBuffer();ch.send(buf);offset+=buf.byteLength;setTransfer({name:file.name,size:file.size,progress:Math.round(offset/file.size*100),direction:"send",type:file.type})}ch.send(JSON.stringify({kind:"file-end"}));notify(`${file.name} sent`)}catch{setTransfer(null);setError(`Sending ${file.name} was interrupted. Reconnect and try again.`)}}
- function sendFiles(files:FileList|null|undefined){for(const file of Array.from(files||[]))sendChain.current=sendChain.current.then(()=>sendOne(file))}
- function leave(){intentionalClose.current=true;if(reconnectTimer.current)clearTimeout(reconnectTimer.current);socketRef.current?.close();pcRef.current?.close();socketRef.current=null;resetRoom();setError("")}
- const fmt=(n:number)=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`,isImage=(t?:Transfer)=>!!t?.url&&PREVIEWABLE.has(t.type||"");
- return <main className={`appShell ${dark?"dark":"light"}`}><aside className="sidebar"><div className="brand"><div className="mark">D</div><div><strong>Dera Share</strong><span>Direct device sharing</span></div></div><div className="sideStatus"><span className={`dot ${status}`}/><div><strong>{room?status==="connected"?"Connected":"Connecting":"Ready"}</strong><span>{room?peerConnected?rtcReady?"Files ready":"Preparing files":"Waiting for device":"No active room"}</span></div></div>{room&&<div className="sideRoom"><span>ROOM CODE</span><strong>{room}</strong><button onClick={()=>navigator.clipboard.writeText(room)}>Copy</button></div>}<div className="sideActions"><button onClick={toggleTheme}>{dark?"☀ Light mode":"☾ Dark mode"}</button>{"Notification"in globalThis&&<button onClick={enableNotifications}>Notifications</button>}{room&&<button className="danger" onClick={leave}>Leave room</button>}</div><small className="privacy">Peer-to-peer files<br/>No permanent storage</small></aside><section className="content"><div className="contentBox"><header><div><h1>{room?"Share":"Connect your devices"}</h1><p>{room?"Send text or any file directly to the connected device.":"Create a temporary room or join one from another device."}</p></div></header>{!room?<div className="setup"><button className="primary big" onClick={createRoom} disabled={busy}>{status==="connecting"?"Connecting…":"Create a room"}</button><div className="divider"><span>or join an existing room</span></div><label>6-digit room code</label><div className="joinRow"><input className="codeInput" inputMode="numeric" maxLength={6} value={roomInput} onChange={e=>setRoomInput(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&joinRoom()} placeholder="000000"/><button className="secondary" onClick={joinRoom} disabled={busy}>Join</button></div></div>:<div className="workspace"><div className="mobileRoom"><span className={`dot ${status}`}/><strong>{peerConnected?rtcReady?"Device linked · Files ready":"Device linked · Preparing files…":"Waiting for other device"}</strong><span>{room}</span></div><div className="tabsTitle">SHARE TEXT</div><div className="editor"><textarea value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Paste or type something…" maxLength={50000}/><div className="editorActions"><button onClick={paste}>Paste</button><span>{draft.length.toLocaleString()} / 50,000</span></div></div><button className="primary send" disabled={!draft.trim()||status!=="connected"} onClick={sendText}>Send text</button><div className="sectionLine"><span>FILE TRANSFER</span></div><div className="fileZone" onClick={()=>fileInput.current?.click()} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();sendFiles(e.dataTransfer.files)}}><input ref={fileInput} hidden multiple type="file" onChange={e=>{sendFiles(e.target.files);e.currentTarget.value=""}}/><div className="fileIcon">↑</div><strong>{rtcReady?"Choose any file":"File sharing is preparing…"}</strong><span>Images · documents · archives · audio · video · up to 500 MB</span></div>{transfer&&<div className="transfer">{isImage(transfer)&&<div className="imagePreview"><img src={transfer.url} alt={transfer.name}/></div>}<div className="transferMeta"><strong>{transfer.direction==="send"?"Sending":"Received"}: {transfer.name}</strong><span>{fmt(transfer.size)} · {transfer.progress}%</span></div><div className="progress"><i style={{width:`${transfer.progress}%`}}/></div>{transfer.url&&<div className="transferActions">{isImage(transfer)&&<a href={transfer.url} target="_blank" rel="noreferrer">Open preview</a>}<a href={transfer.url} download={transfer.name}>Download</a></div>}</div>}<div className="receivedHead"><label>LATEST TEXT</label><span>{received?"Received from your device":"Nothing received yet"}</span></div><div className={`received ${!received?"empty":""}`}><pre>{received||"Incoming text will appear here."}</pre>{received&&<button className="copy" onClick={copy}>{copied?"Copied":"Copy"}</button>}</div></div>}{error&&<div className="error" role="alert">{error}</div>}{toast&&<div className="toast">{toast}</div>}</div></section></main>;
+const IMAGE_TYPES: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    jfif: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    bmp: "image/bmp",
+    avif: "image/avif",
+  },
+  PREVIEWABLE = new Set(Object.values(IMAGE_TYPES));
+function safeFileType(name: string, type: unknown) {
+  if (typeof type === "string" && PREVIEWABLE.has(type)) return type;
+  if (!type) {
+    const ext = name.split(".").pop()?.toLowerCase() || "";
+    if (IMAGE_TYPES[ext]) return IMAGE_TYPES[ext];
+  }
+  return "application/octet-stream";
+}
+export default function Home() {
+  const [status, setStatus] = useState<Status>("idle"),
+    [room, setRoom] = useState(""),
+    [roomInput, setRoomInput] = useState(""),
+    [draft, setDraft] = useState(""),
+    [received, setReceived] = useState(""),
+    [peerConnected, setPeerConnected] = useState(false),
+    [error, setError] = useState(""),
+    [copied, setCopied] = useState(false),
+    [transfer, setTransfer] = useState<Transfer | null>(null),
+    [rtcReady, setRtcReady] = useState(false),
+    [toast, setToast] = useState(""),
+    [dark, setDark] = useState(false);
+  const socketRef = useRef<WebSocket | null>(null),
+    desiredAction = useRef<{ type: "create" | "join"; room?: string } | null>(null),
+    reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
+    intentionalClose = useRef(false),
+    pcRef = useRef<RTCPeerConnection | null>(null),
+    channelRef = useRef<RTCDataChannel | null>(null),
+    incoming = useRef<{ meta?: any; chunks: ArrayBuffer[]; received: number }>({
+      chunks: [],
+      received: 0,
+    }),
+    fileInput = useRef<HTMLInputElement | null>(null),
+    pendingIce = useRef<RTCIceCandidateInit[]>([]),
+    reconnectAttempts = useRef(0),
+    sendChain = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    const saved = localStorage.getItem("dera-theme");
+    setDark(saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches);
+  }, []);
+  const toggleTheme = () =>
+    setDark((v) => {
+      localStorage.setItem("dera-theme", !v ? "dark" : "light");
+      return !v;
+    });
+  const notify = useCallback((body: string) => {
+    setToast(body);
+    setTimeout(() => setToast(""), 2600);
+    if (document.hidden && "Notification" in window && Notification.permission === "granted")
+      new Notification("Dera Share", { body });
+    if ("vibrate" in navigator) navigator.vibrate(80);
+  }, []);
+  const sendSignal = (data: object) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN)
+      socketRef.current.send(JSON.stringify(data));
+  };
+  const bindChannel = useCallback(
+    (ch: RTCDataChannel) => {
+      channelRef.current = ch;
+      ch.binaryType = "arraybuffer";
+      ch.onopen = () => {
+        setRtcReady(true);
+        setError("");
+      };
+      ch.onclose = () => setRtcReady(false);
+      ch.onmessage = (e) => {
+        const fail = (message: string) => {
+          incoming.current = { chunks: [], received: 0 };
+          setTransfer(null);
+          setError(message);
+        };
+        if (typeof e.data === "string") {
+          let msg: any;
+          try {
+            msg = JSON.parse(e.data);
+          } catch {
+            return;
+          }
+          if (msg?.kind === "file-meta") {
+            const size = Number(msg.size);
+            if (!Number.isFinite(size) || size < 0 || size > MAX_FILE) {
+              fail("An incoming file was rejected because it is larger than 500 MB.");
+              return;
+            }
+            const name = (
+                typeof msg.name === "string" && msg.name.trim() ? msg.name : "file"
+              ).slice(0, 255),
+              fileType = safeFileType(name, msg.fileType);
+            incoming.current = { meta: { name, size, fileType }, chunks: [], received: 0 };
+            setTransfer({ name, size, progress: 0, direction: "receive", type: fileType });
+          }
+          if (msg?.kind === "file-end") {
+            const i = incoming.current;
+            if (!i.meta) return;
+            if (i.received !== i.meta.size) {
+              fail(`${i.meta.name} arrived incomplete. Ask the sender to try again.`);
+              return;
+            }
+            const blob = new Blob(i.chunks, { type: i.meta.fileType }),
+              url = URL.createObjectURL(blob);
+            incoming.current = { chunks: [], received: 0 };
+            setTransfer({
+              name: i.meta.name,
+              size: i.meta.size,
+              progress: 100,
+              direction: "receive",
+              url,
+              type: i.meta.fileType,
+            });
+            notify(`${i.meta.name} received`);
+          }
+        } else {
+          const i = incoming.current;
+          if (!i.meta) return;
+          if (i.received + e.data.byteLength > i.meta.size) {
+            fail(`${i.meta.name} was larger than announced and was discarded.`);
+            return;
+          }
+          i.chunks.push(e.data);
+          i.received += e.data.byteLength;
+          setTransfer({
+            name: i.meta.name,
+            size: i.meta.size,
+            progress: Math.min(99, Math.round((i.received / Math.max(1, i.meta.size)) * 100)),
+            direction: "receive",
+            type: i.meta.fileType,
+          });
+        }
+      };
+    },
+    [notify],
+  );
+  const makePeer = useCallback(() => {
+    pcRef.current?.close();
+    pendingIce.current = [];
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+      ],
+    });
+    pcRef.current = pc;
+    pc.onicecandidate = (e) => {
+      if (e.candidate) sendSignal({ type: "rtc-ice", candidate: e.candidate.toJSON() });
+    };
+    pc.ondatachannel = (e) => bindChannel(e.channel);
+    pc.onconnectionstatechange = () => {
+      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) setRtcReady(false);
+    };
+    return pc;
+  }, [bindChannel]);
+  const flushIce = async (pc: RTCPeerConnection) => {
+    for (const c of pendingIce.current.splice(0))
+      try {
+        await pc.addIceCandidate(c);
+      } catch {}
+  };
+  const startOffer = useCallback(async () => {
+    try {
+      const pc = makePeer(),
+        ch = pc.createDataChannel("files", { ordered: true });
+      bindChannel(ch);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      sendSignal({ type: "rtc-offer", sdp: offer });
+    } catch {
+      setError("Could not prepare peer-to-peer file sharing.");
+    }
+  }, [bindChannel, makePeer]);
+  const resetRoom = useCallback(() => {
+    desiredAction.current = null;
+    reconnectAttempts.current = 0;
+    setRoom("");
+    setRoomInput("");
+    setReceived("");
+    setPeerConnected(false);
+    setRtcReady(false);
+    setTransfer(null);
+    setStatus("idle");
+  }, []);
+  const connect = useCallback(
+    (action: { type: "create" | "join"; room?: string }, reconnect = false) => {
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+      const old = socketRef.current;
+      if (old) {
+        old.onopen = old.onmessage = old.onclose = old.onerror = null;
+        if (old.readyState <= WebSocket.OPEN) old.close();
+      }
+      desiredAction.current = action;
+      intentionalClose.current = false;
+      setError("");
+      setStatus(reconnect ? "reconnecting" : "connecting");
+      const socket = new WebSocket(WS_URL);
+      socketRef.current = socket;
+      socket.onopen = () => socket.send(JSON.stringify(action));
+      socket.onmessage = async (event) => {
+        if (socketRef.current !== socket) return;
+        let data: ServerMessage;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        if (data.type === "created" && data.room) {
+          reconnectAttempts.current = 0;
+          setRoom(data.room);
+          setRoomInput(data.room);
+          setStatus("connected");
+          desiredAction.current = { type: "join", room: data.room };
+        } else if (data.type === "joined" && data.room) {
+          reconnectAttempts.current = 0;
+          setRoom(data.room);
+          setRoomInput(data.room);
+          setStatus("connected");
+          setPeerConnected(Boolean(data.peerConnected));
+          if (data.text) setReceived(data.text);
+          desiredAction.current = { type: "join", room: data.room };
+        } else if (data.type === "peer") {
+          setPeerConnected(Boolean(data.connected));
+          if (data.connected) setTimeout(() => startOffer(), 250);
+          else {
+            setRtcReady(false);
+            pcRef.current?.close();
+          }
+        } else if (data.type === "text" && typeof data.text === "string") {
+          setReceived(data.text);
+          notify("New text received");
+        } else if (data.type === "rtc-offer" && data.sdp) {
+          try {
+            const pc = makePeer();
+            await pc.setRemoteDescription(data.sdp);
+            await flushIce(pc);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            sendSignal({ type: "rtc-answer", sdp: answer });
+          } catch {
+            setError("File connection negotiation failed. Rejoin and try again.");
+          }
+        } else if (data.type === "rtc-answer" && data.sdp && pcRef.current) {
+          try {
+            await pcRef.current.setRemoteDescription(data.sdp);
+            await flushIce(pcRef.current);
+          } catch {
+            setError("File connection negotiation failed.");
+          }
+        } else if (data.type === "rtc-ice" && data.candidate) {
+          const pc = pcRef.current;
+          if (!pc || !pc.remoteDescription) pendingIce.current.push(data.candidate);
+          else
+            try {
+              await pc.addIceCandidate(data.candidate);
+            } catch {}
+        } else if (data.type === "error") {
+          const roomError =
+            data.code === "ROOM_FULL" || data.code === "ROOM_NOT_FOUND" || data.code === "BAD_ROOM";
+          if (
+            data.code === "ROOM_FULL" &&
+            reconnectAttempts.current > 0 &&
+            reconnectAttempts.current < MAX_RECONNECT_FULL
+          ) {
+            socket.close();
+            return;
+          }
+          setError(data.message || "Something went wrong.");
+          if (roomError) {
+            intentionalClose.current = true;
+            socket.close();
+            resetRoom();
+          }
+        }
+      };
+      socket.onclose = () => {
+        if (socketRef.current !== socket || intentionalClose.current) return;
+        setPeerConnected(false);
+        setRtcReady(false);
+        pcRef.current?.close();
+        const action = desiredAction.current;
+        if (action?.room) {
+          setStatus("reconnecting");
+          const delay = Math.min(30000, 1000 * 2 ** reconnectAttempts.current++);
+          reconnectTimer.current = setTimeout(() => connect(action, true), delay);
+        } else setStatus("offline");
+      };
+      socket.onerror = () => {
+        if (socketRef.current === socket) setError("Could not reach the Dera Share server.");
+      };
+    },
+    [makePeer, notify, resetRoom, startOffer],
+  );
+  useEffect(
+    () => () => {
+      intentionalClose.current = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      socketRef.current?.close();
+      pcRef.current?.close();
+    },
+    [],
+  );
+  useEffect(
+    () => () => {
+      if (transfer?.url) URL.revokeObjectURL(transfer.url);
+    },
+    [transfer?.url],
+  );
+  const busy = status === "connecting" || status === "reconnecting",
+    createRoom = () => {
+      if (!busy) connect({ type: "create" });
+    },
+    joinRoom = () => {
+      if (busy) return;
+      const code = roomInput.replace(/\D/g, "").slice(0, 6);
+      if (code.length !== 6) {
+        setError("Enter a 6-digit room code.");
+        return;
+      }
+      connect({ type: "join", room: code });
+    };
+  const sendText = () => {
+    if (!draft.trim() || socketRef.current?.readyState !== WebSocket.OPEN) return;
+    sendSignal({ type: "text", text: draft });
+    setDraft("");
+    notify("Text sent");
+  };
+  async function paste() {
+    try {
+      setDraft(await navigator.clipboard.readText());
+    } catch {
+      setError("Clipboard permission was blocked. Paste manually.");
+    }
+  }
+  async function copy() {
+    if (!received) return;
+    try {
+      await navigator.clipboard.writeText(received);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setError("Could not copy automatically.");
+    }
+  }
+  async function enableNotifications() {
+    if ("Notification" in window) {
+      const p = await Notification.requestPermission();
+      notify(p === "granted" ? "Notifications enabled" : "Notifications were not enabled");
+    }
+  }
+  async function sendOne(file: File) {
+    const ch = channelRef.current;
+    if (!ch || ch.readyState !== "open") {
+      setError("File transfer is not ready yet. Wait until Files ready appears.");
+      return;
+    }
+    if (file.size > MAX_FILE) {
+      setError(`${file.name} is larger than the 500 MB limit.`);
+      return;
+    }
+    setError("");
+    setTransfer({
+      name: file.name,
+      size: file.size,
+      progress: 0,
+      direction: "send",
+      type: file.type,
+    });
+    try {
+      ch.send(
+        JSON.stringify({
+          kind: "file-meta",
+          name: file.name,
+          size: file.size,
+          fileType: file.type,
+        }),
+      );
+      let offset = 0;
+      while (offset < file.size) {
+        while (ch.bufferedAmount > 4 * 1024 * 1024) {
+          if (ch.readyState !== "open") throw new Error("closed");
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        const buf = await file.slice(offset, offset + CHUNK).arrayBuffer();
+        ch.send(buf);
+        offset += buf.byteLength;
+        setTransfer({
+          name: file.name,
+          size: file.size,
+          progress: Math.round((offset / file.size) * 100),
+          direction: "send",
+          type: file.type,
+        });
+      }
+      ch.send(JSON.stringify({ kind: "file-end" }));
+      notify(`${file.name} sent`);
+    } catch {
+      setTransfer(null);
+      setError(`Sending ${file.name} was interrupted. Reconnect and try again.`);
+    }
+  }
+  function sendFiles(files: FileList | null | undefined) {
+    for (const file of Array.from(files || []))
+      sendChain.current = sendChain.current.then(() => sendOne(file));
+  }
+  function leave() {
+    intentionalClose.current = true;
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    socketRef.current?.close();
+    pcRef.current?.close();
+    socketRef.current = null;
+    resetRoom();
+    setError("");
+  }
+  const fmt = (n: number) =>
+      n < 1024
+        ? `${n} B`
+        : n < 1048576
+          ? `${(n / 1024).toFixed(1)} KB`
+          : `${(n / 1048576).toFixed(1)} MB`,
+    isImage = (t?: Transfer) => !!t?.url && PREVIEWABLE.has(t.type || "");
+  return (
+    <main className={`appShell ${dark ? "dark" : "light"}`}>
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="mark">D</div>
+          <div>
+            <strong>Dera Share</strong>
+            <span>Direct device sharing</span>
+          </div>
+        </div>
+        <div className="sideStatus">
+          <span className={`dot ${status}`} />
+          <div>
+            <strong>
+              {room ? (status === "connected" ? "Connected" : "Connecting") : "Ready"}
+            </strong>
+            <span>
+              {room
+                ? peerConnected
+                  ? rtcReady
+                    ? "Files ready"
+                    : "Preparing files"
+                  : "Waiting for device"
+                : "No active room"}
+            </span>
+          </div>
+        </div>
+        {room && (
+          <div className="sideRoom">
+            <span>ROOM CODE</span>
+            <strong>{room}</strong>
+            <button onClick={() => navigator.clipboard.writeText(room)}>Copy</button>
+          </div>
+        )}
+        <div className="sideActions">
+          <button onClick={toggleTheme}>{dark ? "☀ Light mode" : "☾ Dark mode"}</button>
+          {"Notification" in globalThis && (
+            <button onClick={enableNotifications}>Notifications</button>
+          )}
+          {room && (
+            <button className="danger" onClick={leave}>
+              Leave room
+            </button>
+          )}
+        </div>
+        <small className="privacy">
+          Peer-to-peer files
+          <br />
+          No permanent storage
+        </small>
+      </aside>
+      <section className="content">
+        <div className="contentBox">
+          <header>
+            <div>
+              <h1>{room ? "Share" : "Connect your devices"}</h1>
+              <p>
+                {room
+                  ? "Send text or any file directly to the connected device."
+                  : "Create a temporary room or join one from another device."}
+              </p>
+            </div>
+          </header>
+          {!room ? (
+            <div className="setup">
+              <button className="primary big" onClick={createRoom} disabled={busy}>
+                {status === "connecting" ? "Connecting…" : "Create a room"}
+              </button>
+              <div className="divider">
+                <span>or join an existing room</span>
+              </div>
+              <label>6-digit room code</label>
+              <div className="joinRow">
+                <input
+                  className="codeInput"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={roomInput}
+                  onChange={(e) => setRoomInput(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(e) => e.key === "Enter" && joinRoom()}
+                  placeholder="000000"
+                />
+                <button className="secondary" onClick={joinRoom} disabled={busy}>
+                  Join
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="workspace">
+              <div className="mobileRoom">
+                <span className={`dot ${status}`} />
+                <strong>
+                  {peerConnected
+                    ? rtcReady
+                      ? "Device linked · Files ready"
+                      : "Device linked · Preparing files…"
+                    : "Waiting for other device"}
+                </strong>
+                <span>{room}</span>
+              </div>
+              <div className="tabsTitle">SHARE TEXT</div>
+              <div className="editor">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Paste or type something…"
+                  maxLength={50000}
+                />
+                <div className="editorActions">
+                  <button onClick={paste}>Paste</button>
+                  <span>{draft.length.toLocaleString()} / 50,000</span>
+                </div>
+              </div>
+              <button
+                className="primary send"
+                disabled={!draft.trim() || status !== "connected"}
+                onClick={sendText}
+              >
+                Send text
+              </button>
+              <div className="sectionLine">
+                <span>FILE TRANSFER</span>
+              </div>
+              <div
+                className="fileZone"
+                onClick={() => fileInput.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  sendFiles(e.dataTransfer.files);
+                }}
+              >
+                <input
+                  ref={fileInput}
+                  hidden
+                  multiple
+                  type="file"
+                  onChange={(e) => {
+                    sendFiles(e.target.files);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <div className="fileIcon">↑</div>
+                <strong>{rtcReady ? "Choose any file" : "File sharing is preparing…"}</strong>
+                <span>Images · documents · archives · audio · video · up to 500 MB</span>
+              </div>
+              {transfer && (
+                <div className="transfer">
+                  {isImage(transfer) && (
+                    <div className="imagePreview">
+                      <img src={transfer.url} alt={transfer.name} />
+                    </div>
+                  )}
+                  <div className="transferMeta">
+                    <strong>
+                      {transfer.direction === "send" ? "Sending" : "Received"}: {transfer.name}
+                    </strong>
+                    <span>
+                      {fmt(transfer.size)} · {transfer.progress}%
+                    </span>
+                  </div>
+                  <div className="progress">
+                    <i style={{ width: `${transfer.progress}%` }} />
+                  </div>
+                  {transfer.url && (
+                    <div className="transferActions">
+                      {isImage(transfer) && (
+                        <a href={transfer.url} target="_blank" rel="noreferrer">
+                          Open preview
+                        </a>
+                      )}
+                      <a href={transfer.url} download={transfer.name}>
+                        Download
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="receivedHead">
+                <label>LATEST TEXT</label>
+                <span>{received ? "Received from your device" : "Nothing received yet"}</span>
+              </div>
+              <div className={`received ${!received ? "empty" : ""}`}>
+                <pre>{received || "Incoming text will appear here."}</pre>
+                {received && (
+                  <button className="copy" onClick={copy}>
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {error && (
+            <div className="error" role="alert">
+              {error}
+            </div>
+          )}
+          {toast && <div className="toast">{toast}</div>}
+        </div>
+      </section>
+    </main>
+  );
 }
