@@ -1,20 +1,22 @@
 import { useEffect, useState } from "react";
+import { THEME_STORAGE_KEY } from "@/lib/theme";
 
-const STORAGE_KEY = "dera-theme";
-
+// The theme lives on <html data-theme>, set before paint by themeInitScript in the layout.
 export function useTheme() {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    setDark(saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches);
+    setDark(document.documentElement.dataset.theme === "dark");
   }, []);
 
-  const toggleTheme = () =>
-    setDark((v) => {
-      localStorage.setItem(STORAGE_KEY, !v ? "dark" : "light");
-      return !v;
-    });
+  const toggleTheme = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.dataset.theme = next ? "dark" : "light";
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next ? "dark" : "light");
+    } catch {}
+  };
 
   return { dark, toggleTheme };
 }

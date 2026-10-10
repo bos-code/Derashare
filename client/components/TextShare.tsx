@@ -2,13 +2,14 @@ import { useState } from "react";
 import { MAX_TEXT_LENGTH } from "@/lib/protocol";
 
 type Props = {
+  initialDraft?: string;
   canSend: boolean;
   onSend: (text: string) => boolean;
   onError: (message: string) => void;
 };
 
-export function TextShare({ canSend, onSend, onError }: Props) {
-  const [draft, setDraft] = useState("");
+export function TextShare({ initialDraft = "", canSend, onSend, onError }: Props) {
+  const [draft, setDraft] = useState(initialDraft);
 
   const paste = async () => {
     try {

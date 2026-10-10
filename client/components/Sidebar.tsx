@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { Status } from "@/hooks/useRoomSocket";
 
 type Props = {
@@ -45,6 +46,11 @@ export function Sidebar({
   onEnableNotifications,
   onLeave,
 }: Props) {
+  // Checked after mount: the server has no Notification API, and rendering the button there but
+  // not on the server would make React discard the server HTML on hydration.
+  const [canNotify, setCanNotify] = useState(false);
+  useEffect(() => setCanNotify("Notification" in window), []);
+
   const title = room ? (status === "connected" ? "Connected" : "Connecting") : "Ready";
   const detail = !room
     ? "No active room"
@@ -85,7 +91,7 @@ export function Sidebar({
           label={dark ? "Light mode" : "Dark mode"}
           onClick={onToggleTheme}
         />
-        {"Notification" in globalThis && (
+        {canNotify && (
           <SideButton icon="🔔" label="Notifications" onClick={onEnableNotifications} />
         )}
         {room && <SideButton icon="✕" label="Leave room" className="danger" onClick={onLeave} />}

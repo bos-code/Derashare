@@ -14,9 +14,12 @@ import { usePeerTransfer } from "@/hooks/usePeerTransfer";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useTextHistory } from "@/hooks/useTextHistory";
 import { useTheme } from "@/hooks/useTheme";
+import { MAX_TEXT_LENGTH } from "@/lib/protocol";
 
 export default function Home() {
   const [error, setError] = useState("");
+  // Text handed over by the OS share sheet (manifest share_target), waiting to be sent.
+  const [sharedText, setSharedText] = useState("");
   const { dark, toggleTheme } = useTheme();
   const { toast, notify, enableNotifications } = useNotify();
   const history = useTextHistory();
@@ -48,17 +51,23 @@ export default function Home() {
   const { status, room, peerConnected } = socket;
 
   // Opening a join link (/?room=123456, e.g. from the QR code) joins that room straight away.
+  // Text shared from another app via the OS share sheet (?title=&text=&url=) is put in the draft.
   const autoJoined = useRef(false);
   const joinRoom = socket.join;
   useEffect(() => {
     if (autoJoined.current) return;
     autoJoined.current = true;
     const params = new URLSearchParams(window.location.search);
+    const shared = [params.get("title"), params.get("text"), params.get("url")]
+      .filter(Boolean)
+      .join("\n");
+    if (shared) setSharedText(shared.slice(0, MAX_TEXT_LENGTH));
     const code = params.get("room");
-    if (!code) return;
-    params.delete("room");
+    for (const key of ["room", "title", "text", "url"]) params.delete(key);
     const query = params.toString();
-    window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+    if (shared || code)
+      window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+    if (!code) return;
     if (/^\d{6}$/.test(code)) joinRoom(code);
     else setError("That join link is invalid. Enter the 6-digit room code instead.");
   }, [joinRoom]);
@@ -67,12 +76,13 @@ export default function Home() {
   const sendText = (text: string) => {
     if (!socket.send({ type: "text", text })) return false;
     history.add("sent", text);
+    setSharedText("");
     notify("Text sent");
     return true;
   };
 
   return (
-    <main className={`appShell ${dark ? "dark" : "light"}`}>
+    <main className="appShell">
       <Sidebar
         status={status}
         room={room}
@@ -120,7 +130,12 @@ export default function Home() {
                 <span>{room}</span>
               </div>
               {!peerConnected && <InviteCard room={room} onError={setError} />}
-              <TextShare canSend={status === "connected"} onSend={sendText} onError={setError} />
+              <TextShare
+                initialDraft={sharedText}
+                canSend={status === "connected"}
+                onSend={sendText}
+                onError={setError}
+              />
               <div className="sectionLine">
                 <span>FILE TRANSFER</span>
               </div>
