@@ -1,10 +1,17 @@
 import { formatBytes, isPreviewable, type Transfer } from "@/lib/files";
 
+function statusText(t: Transfer) {
+  if (t.status === "queued") return "Waiting";
+  if (t.status === "failed") return "Failed";
+  if (t.status === "done") return t.direction === "send" ? "Sent" : "Received";
+  return `${t.progress}%`;
+}
+
 export function TransferCard({ transfer }: { transfer: Transfer }) {
   const preview = isPreviewable(transfer);
 
   return (
-    <div className="transfer">
+    <div className={`transfer ${transfer.status}`}>
       {preview && (
         <div className="imagePreview">
           {/* next/image can't optimise a local blob: URL, so a plain <img> is intended. */}
@@ -14,15 +21,17 @@ export function TransferCard({ transfer }: { transfer: Transfer }) {
       )}
       <div className="transferMeta">
         <strong>
-          {transfer.direction === "send" ? "Sending" : "Received"}: {transfer.name}
+          {transfer.direction === "send" ? "↑" : "↓"} {transfer.name}
         </strong>
         <span>
-          {formatBytes(transfer.size)} · {transfer.progress}%
+          {formatBytes(transfer.size)} · {statusText(transfer)}
         </span>
       </div>
-      <div className="progress">
-        <i style={{ width: `${transfer.progress}%` }} />
-      </div>
+      {transfer.status !== "done" && transfer.status !== "failed" && (
+        <div className="progress">
+          <i style={{ width: `${transfer.progress}%` }} />
+        </div>
+      )}
       {transfer.url && (
         <div className="transferActions">
           {preview && (

@@ -7,7 +7,7 @@ import { JoinPanel } from "@/components/JoinPanel";
 import { ReceivedText } from "@/components/ReceivedText";
 import { Sidebar } from "@/components/Sidebar";
 import { TextShare } from "@/components/TextShare";
-import { TransferCard } from "@/components/TransferCard";
+import { TransferList } from "@/components/TransferList";
 import { useNotify } from "@/hooks/useNotify";
 import { usePeerTransfer } from "@/hooks/usePeerTransfer";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
@@ -119,7 +119,7 @@ export default function Home() {
                 rtcFailed={peer.rtcFailed}
                 onFiles={peer.sendFiles}
               />
-              {peer.transfer && <TransferCard transfer={peer.transfer} />}
+              <TransferList transfers={peer.transfers} onClear={peer.clearTransfers} />
               <ReceivedText text={socket.received} onError={setError} />
             </div>
           )}

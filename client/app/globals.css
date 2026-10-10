@@ -614,3 +614,33 @@ textarea:focus {
     margin-right: 0;
   }
 }
+
+.transferList {
+  display: grid;
+  gap: 8px;
+}
+.transferListHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.transferListHead button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.transferList .imagePreview {
+  max-height: 220px;
+}
+.transfer.failed .transferMeta span {
+  color: var(--danger);
+}
+.transfer.queued {
+  opacity: 0.7;
+}

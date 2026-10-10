@@ -1,7 +1,11 @@
 export const CHUNK_SIZE = 64 * 1024;
 export const MAX_FILE_SIZE = 500 * 1024 * 1024;
 
+export type TransferStatus = "queued" | "active" | "done" | "failed";
+
 export type Transfer = {
+  id: string;
+  status: TransferStatus;
   name: string;
   size: number;
   progress: number;
