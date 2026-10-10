@@ -28,6 +28,28 @@ npm run dev
 
 Open `http://localhost:3000`. The WebSocket server runs on port `8080`.
 
+### Checks
+
+These run in CI (`.github/workflows/ci.yml`) on every push to `main` and every pull request:
+
+```bash
+npm run format:check                     # Prettier, whole repo (npm run format to fix)
+npm --prefix server run typecheck        # server source and tests
+npm --prefix server test                 # server integration tests
+npm --prefix client run lint             # ESLint (Next.js rules)
+npm --prefix client run typecheck
+npm run build
+```
+
+### Layout
+
+- `server/src/realtime.ts`: room, relay, rate-limit and heartbeat logic (`createRealtimeServer`)
+- `server/src/index.ts`: reads environment variables and starts the server
+- `client/hooks/useRoomSocket.ts`: WebSocket connection, reconnects and room state
+- `client/hooks/usePeerTransfer.ts`: WebRTC negotiation and file transfer
+- `client/components/`: UI pieces composed by `client/app/page.tsx`
+- `client/lib/`: message types and file helpers
+
 ## Environment
 
 Copy `.env.example` to `client/.env.local`:

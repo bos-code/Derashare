@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@types/node": "^22.0.0",
@@ -16,5 +17,10 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "typescript": "^5.9.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.7",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.27"
   }
 }

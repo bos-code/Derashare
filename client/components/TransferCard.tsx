@@ -7,6 +7,8 @@ export function TransferCard({ transfer }: { transfer: Transfer }) {
     <div className="transfer">
       {preview && (
         <div className="imagePreview">
+          {/* next/image can't optimise a local blob: URL, so a plain <img> is intended. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={transfer.url} alt={transfer.name} />
         </div>
       )}

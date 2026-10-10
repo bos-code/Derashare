@@ -408,7 +408,7 @@ textarea:focus {
 .receivedHead {
   display: flex;
   justify-content: space-between;
-  align-items: end;
+  align-items: flex-end;
   margin-top: 8px;
 }
 .receivedHead span {
