@@ -2,7 +2,13 @@ import { after, afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { WebSocket, type ClientOptions } from "ws";
-import { createRealtimeServer, type RealtimeOptions } from "../src/realtime.js";
+import { createHmac } from "node:crypto";
+import {
+  buildIceServers,
+  createRealtimeServer,
+  defaultOptions,
+  type RealtimeOptions,
+} from "../src/realtime.js";
 
 type Message = { type: string; [key: string]: unknown };
 type TestClient = WebSocket & { messages: Message[]; next: (type?: string) => Promise<Message> };
@@ -213,5 +219,43 @@ describe("realtime server", () => {
     const { url } = await startServer({ allowedOrigins: ["https://ok.example"] });
     await assert.rejects(connect(url, { origin: "https://evil.example" }), /HTTP 401/);
     await connect(url, { origin: "https://ok.example" });
+  });
+
+  it("sends ICE servers with room responses", async () => {
+    const { url } = await startServer({
+      turnUrls: ["turn:turn.example:3478"],
+      turnUsername: "user",
+      turnCredential: "pass",
+    });
+    const host = await connect(url);
+    send(host, { type: "create" });
+    const created = await host.next("created");
+    assert.deepEqual(created.iceServers, [
+      { urls: defaultOptions.stunUrls },
+      { urls: ["turn:turn.example:3478"], username: "user", credential: "pass" },
+    ]);
+    const guest = await connect(url);
+    send(guest, { type: "join", room: created.room });
+    assert.deepEqual((await guest.next("joined")).iceServers, created.iceServers);
+  });
+});
+
+describe("buildIceServers", () => {
+  it("uses only STUN when TURN isn't configured", () => {
+    assert.deepEqual(buildIceServers(defaultOptions), [{ urls: defaultOptions.stunUrls }]);
+  });
+
+  it("issues expiring HMAC credentials for a shared TURN secret", () => {
+    const now = Date.UTC(2026, 0, 1);
+    const [, turn] = buildIceServers(
+      { ...defaultOptions, turnUrls: ["turn:t.example"], turnSecret: "s3cret", turnTtlSeconds: 60 },
+      now,
+    );
+    const [expiry] = turn.username!.split(":");
+    assert.equal(Number(expiry), now / 1000 + 60);
+    assert.equal(
+      turn.credential,
+      createHmac("sha1", "s3cret").update(turn.username!).digest("base64"),
+    );
   });
 });

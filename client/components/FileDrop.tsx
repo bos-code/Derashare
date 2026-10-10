@@ -1,8 +1,8 @@
 import { useRef } from "react";
 
-type Props = { rtcReady: boolean; onFiles: (files: FileList | null) => void };
+type Props = { rtcReady: boolean; rtcFailed: boolean; onFiles: (files: FileList | null) => void };
 
-export function FileDrop({ rtcReady, onFiles }: Props) {
+export function FileDrop({ rtcReady, rtcFailed, onFiles }: Props) {
   const input = useRef<HTMLInputElement | null>(null);
 
   return (
@@ -26,7 +26,13 @@ export function FileDrop({ rtcReady, onFiles }: Props) {
         }}
       />
       <div className="fileIcon">↑</div>
-      <strong>{rtcReady ? "Choose any file" : "File sharing is preparing…"}</strong>
+      <strong>
+        {rtcReady
+          ? "Choose any file"
+          : rtcFailed
+            ? "File sharing unavailable on this network"
+            : "File sharing is preparing…"}
+      </strong>
       <span>Images · documents · archives · audio · video · up to 500 MB</span>
     </div>
   );

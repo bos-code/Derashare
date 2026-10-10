@@ -19,8 +19,14 @@ export type RtcSignal =
   | { type: "rtc-ice"; candidate: RTCIceCandidateInit };
 
 export type ServerMessage =
-  | { type: "created"; room: string }
-  | { type: "joined"; room: string; text: string; peerConnected: boolean }
+  | { type: "created"; room: string; iceServers?: RTCIceServer[] }
+  | {
+      type: "joined";
+      room: string;
+      text: string;
+      peerConnected: boolean;
+      iceServers?: RTCIceServer[];
+    }
   | { type: "peer"; connected: boolean }
   | { type: "text"; text: string }
   | { type: "error"; code: ErrorCode; message: string }

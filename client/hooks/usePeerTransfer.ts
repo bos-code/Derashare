@@ -9,10 +9,12 @@ import {
 } from "@/lib/files";
 import type { ClientMessage, RtcSignal } from "@/lib/protocol";
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
+// Used until the server sends its own list (which may include TURN relays).
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
+  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
 ];
+// How long to wait for the data channel to open before telling the user it isn't going to.
+const CONNECT_TIMEOUT_MS = 20_000;
 // Pause sending while this much data is queued in the data channel.
 const MAX_BUFFERED = 4 * 1024 * 1024;
 
@@ -23,6 +25,7 @@ type Incoming = {
 };
 
 type Options = {
+  iceServers: RTCIceServer[] | null;
   sendSignal: (message: ClientMessage) => void;
   notify: (message: string) => void;
   onError: (message: string) => void;
@@ -30,17 +33,36 @@ type Options = {
 
 // WebRTC data channel used to send files directly between the two devices. The device that sees the
 // other one arrive makes the offer; signalling goes through the realtime server.
-export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
+export function usePeerTransfer({ iceServers, sendSignal, notify, onError }: Options) {
   const [rtcReady, setRtcReady] = useState(false);
   const [transfer, setTransfer] = useState<Transfer | null>(null);
+  // The peer is present but a direct (or relayed) connection could not be established.
+  const [rtcFailed, setRtcFailed] = useState(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<RTCDataChannel | null>(null);
   const pendingIce = useRef<RTCIceCandidateInit[]>([]);
   const incoming = useRef<Incoming>({ chunks: [], received: 0 });
   const sendChain = useRef<Promise<void>>(Promise.resolve());
-  const optionsRef = useRef({ sendSignal, notify, onError });
-  optionsRef.current = { sendSignal, notify, onError };
+  const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const optionsRef = useRef({ iceServers, sendSignal, notify, onError });
+  optionsRef.current = { iceServers, sendSignal, notify, onError };
+
+  const clearConnectTimer = useCallback(() => {
+    if (connectTimer.current) clearTimeout(connectTimer.current);
+    connectTimer.current = null;
+  }, []);
+  const armConnectTimer = useCallback(() => {
+    clearConnectTimer();
+    setRtcFailed(false);
+    connectTimer.current = setTimeout(() => {
+      if (channelRef.current?.readyState === "open") return;
+      setRtcFailed(true);
+      optionsRef.current.onError(
+        "Couldn't open a direct connection to the other device, so file sharing is unavailable. Text still works. Try both devices on the same Wi-Fi, or leave and rejoin.",
+      );
+    }, CONNECT_TIMEOUT_MS);
+  }, [clearConnectTimer]);
 
   const handleChannelMessage = useCallback((e: MessageEvent) => {
     const { notify, onError } = optionsRef.current;
@@ -117,19 +139,23 @@ export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
       channelRef.current = ch;
       ch.binaryType = "arraybuffer";
       ch.onopen = () => {
+        clearConnectTimer();
+        setRtcFailed(false);
         setRtcReady(true);
         optionsRef.current.onError("");
       };
       ch.onclose = () => setRtcReady(false);
       ch.onmessage = handleChannelMessage;
     },
-    [handleChannelMessage],
+    [clearConnectTimer, handleChannelMessage],
   );
 
   const makePeer = useCallback(() => {
     pcRef.current?.close();
     pendingIce.current = [];
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({
+      iceServers: optionsRef.current.iceServers ?? FALLBACK_ICE_SERVERS,
+    });
     pcRef.current = pc;
     pc.onicecandidate = (e) => {
       if (e.candidate)
@@ -152,6 +178,7 @@ export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
 
   const startOffer = useCallback(async () => {
     try {
+      armConnectTimer();
       const pc = makePeer();
       bindChannel(pc.createDataChannel("files", { ordered: true }));
       const offer = await pc.createOffer();
@@ -160,12 +187,14 @@ export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
     } catch {
       optionsRef.current.onError("Could not prepare peer-to-peer file sharing.");
     }
-  }, [bindChannel, makePeer]);
+  }, [armConnectTimer, bindChannel, makePeer]);
 
   const close = useCallback(() => {
+    clearConnectTimer();
+    setRtcFailed(false);
     setRtcReady(false);
     pcRef.current?.close();
-  }, []);
+  }, [clearConnectTimer]);
 
   const reset = useCallback(() => {
     close();
@@ -185,6 +214,7 @@ export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
       const { sendSignal, onError } = optionsRef.current;
       if (signal.type === "rtc-offer") {
         try {
+          armConnectTimer();
           const pc = makePeer();
           await pc.setRemoteDescription(signal.sdp);
           await flushIce(pc);
@@ -213,7 +243,7 @@ export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
         }
       }
     },
-    [makePeer],
+    [armConnectTimer, makePeer],
   );
 
   const sendOne = useCallback(async (file: File) => {
@@ -274,7 +304,13 @@ export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
     [sendOne],
   );
 
-  useEffect(() => () => pcRef.current?.close(), []);
+  useEffect(
+    () => () => {
+      clearConnectTimer();
+      pcRef.current?.close();
+    },
+    [clearConnectTimer],
+  );
   useEffect(
     () => () => {
       if (transfer?.url) URL.revokeObjectURL(transfer.url);
@@ -282,5 +318,5 @@ export function usePeerTransfer({ sendSignal, notify, onError }: Options) {
     [transfer?.url],
   );
 
-  return { rtcReady, transfer, sendFiles, onPeer, handleSignal, close, reset };
+  return { rtcReady, rtcFailed, transfer, sendFiles, onPeer, handleSignal, close, reset };
 }

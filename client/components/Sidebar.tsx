@@ -5,6 +5,7 @@ type Props = {
   room: string;
   peerConnected: boolean;
   rtcReady: boolean;
+  rtcFailed: boolean;
   dark: boolean;
   onToggleTheme: () => void;
   onEnableNotifications: () => void;
@@ -16,6 +17,7 @@ export function Sidebar({
   room,
   peerConnected,
   rtcReady,
+  rtcFailed,
   dark,
   onToggleTheme,
   onEnableNotifications,
@@ -28,7 +30,9 @@ export function Sidebar({
       ? "Waiting for device"
       : rtcReady
         ? "Files ready"
-        : "Preparing files";
+        : rtcFailed
+          ? "Files unavailable"
+          : "Preparing files";
 
   return (
     <aside className="sidebar">

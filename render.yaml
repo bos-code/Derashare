@@ -12,3 +12,7 @@ services:
         value: "1"
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_SECRET
+        sync: false

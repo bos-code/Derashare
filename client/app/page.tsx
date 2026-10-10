@@ -28,7 +28,12 @@ export default function Home() {
     onLeave: () => peer.reset(),
     onError: setError,
   });
-  const peer = usePeerTransfer({ sendSignal: socket.send, notify, onError: setError });
+  const peer = usePeerTransfer({
+    iceServers: socket.iceServers,
+    sendSignal: socket.send,
+    notify,
+    onError: setError,
+  });
 
   const { status, room, peerConnected } = socket;
   const busy = status === "connecting" || status === "reconnecting";
@@ -46,6 +51,7 @@ export default function Home() {
         room={room}
         peerConnected={peerConnected}
         rtcReady={peer.rtcReady}
+        rtcFailed={peer.rtcFailed}
         dark={dark}
         onToggleTheme={toggleTheme}
         onEnableNotifications={enableNotifications}
@@ -79,7 +85,9 @@ export default function Home() {
                   {peerConnected
                     ? peer.rtcReady
                       ? "Device linked · Files ready"
-                      : "Device linked · Preparing files…"
+                      : peer.rtcFailed
+                        ? "Device linked · Files unavailable"
+                        : "Device linked · Preparing files…"
                     : "Waiting for other device"}
                 </strong>
                 <span>{room}</span>
@@ -88,7 +96,11 @@ export default function Home() {
               <div className="sectionLine">
                 <span>FILE TRANSFER</span>
               </div>
-              <FileDrop rtcReady={peer.rtcReady} onFiles={peer.sendFiles} />
+              <FileDrop
+                rtcReady={peer.rtcReady}
+                rtcFailed={peer.rtcFailed}
+                onFiles={peer.sendFiles}
+              />
               {peer.transfer && <TransferCard transfer={peer.transfer} />}
               <ReceivedText text={socket.received} onError={setError} />
             </div>

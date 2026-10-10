@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { randomInt } from "node:crypto";
+import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const MAX_TEXT_LENGTH = 50_000;
@@ -19,6 +19,16 @@ export type RealtimeOptions = {
   // Any message type, per connection. Generous enough for WebRTC ICE bursts.
   messagesPerWindow: number;
   messageWindowMs: number;
+  // ICE servers handed to clients for WebRTC. TURN relays file transfers when a direct connection
+  // is impossible (symmetric NAT, many mobile networks).
+  stunUrls: string[];
+  turnUrls: string[];
+  // coturn-style shared secret (`use-auth-secret`): each join gets short-lived credentials.
+  turnSecret?: string;
+  // Or fixed credentials, e.g. from a hosted TURN provider.
+  turnUsername?: string;
+  turnCredential?: string;
+  turnTtlSeconds: number;
 };
 
 export const defaultOptions: RealtimeOptions = {
@@ -31,7 +41,30 @@ export const defaultOptions: RealtimeOptions = {
   roomAttemptWindowMs: 60_000,
   messagesPerWindow: 300,
   messageWindowMs: 10_000,
+  stunUrls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"],
+  turnUrls: [],
+  turnTtlSeconds: 12 * 60 * 60,
 };
+
+export type IceServer = { urls: string[]; username?: string; credential?: string };
+
+export function buildIceServers(options: RealtimeOptions, now = Date.now()): IceServer[] {
+  const servers: IceServer[] = [];
+  if (options.stunUrls.length) servers.push({ urls: options.stunUrls });
+  if (options.turnUrls.length && options.turnSecret) {
+    const expiry = Math.floor(now / 1000) + options.turnTtlSeconds;
+    const username = `${expiry}:${randomBytes(6).toString("hex")}`;
+    const credential = createHmac("sha1", options.turnSecret).update(username).digest("base64");
+    servers.push({ urls: options.turnUrls, username, credential });
+  } else if (options.turnUrls.length && options.turnUsername && options.turnCredential) {
+    servers.push({
+      urls: options.turnUrls,
+      username: options.turnUsername,
+      credential: options.turnCredential,
+    });
+  }
+  return servers;
+}
 
 type Client = WebSocket & {
   room?: string;
@@ -134,12 +167,13 @@ export function createRealtimeServer(overrides: Partial<RealtimeOptions> = {}): 
     send(
       ws,
       created
-        ? { type: "created", room: code }
+        ? { type: "created", room: code, iceServers: buildIceServers(options) }
         : {
             type: "joined",
             room: code,
             text: room.latestText,
             peerConnected: room.clients.size > 1,
+            iceServers: buildIceServers(options),
           },
     );
     relay(ws, { type: "peer", connected: true });

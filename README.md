@@ -62,11 +62,16 @@ Production must use a secure `wss://` endpoint.
 
 Server environment variables (all optional):
 
-| Variable          | Purpose                                                                                                                                                             |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ALLOWED_ORIGINS` | Comma-separated frontend origins allowed to connect, e.g. `https://derashare.vercel.app`. Unset allows any origin, which is only appropriate for local development. |
-| `TRUST_PROXY`     | Set to `1` behind a reverse proxy (Render, Railway) so rate limits use the client IP from `x-forwarded-for`.                                                        |
-| `MAX_ROOMS`       | Maximum concurrent rooms. Defaults to `10000`.                                                                                                                      |
+| Variable                            | Purpose                                                                                                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ALLOWED_ORIGINS`                   | Comma-separated frontend origins allowed to connect, e.g. `https://derashare.vercel.app`. Unset allows any origin, which is only appropriate for local development. |
+| `TRUST_PROXY`                       | Set to `1` behind a reverse proxy (Render, Railway) so rate limits use the client IP from `x-forwarded-for`.                                                        |
+| `MAX_ROOMS`                         | Maximum concurrent rooms. Defaults to `10000`.                                                                                                                      |
+| `TURN_URLS`                         | Comma-separated TURN URLs, e.g. `turn:turn.example.com:3478,turns:turn.example.com:5349`.                                                                           |
+| `TURN_SECRET`                       | Shared secret for coturn's `use-auth-secret` mode. Each device gets credentials that expire after 12 hours.                                                         |
+| `TURN_USERNAME` / `TURN_CREDENTIAL` | Fixed credentials instead of `TURN_SECRET`, e.g. from a hosted TURN provider.                                                                                       |
+
+Without TURN, files only transfer when the two devices can reach each other directly. That usually works on the same Wi-Fi and often fails between mobile networks. After 20 seconds without a connection the app says file sharing is unavailable; text keeps working through the server either way.
 
 ## Security model
 

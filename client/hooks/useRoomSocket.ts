@@ -30,6 +30,7 @@ export function useRoomSocket(handlers: RoomSocketHandlers) {
   const [room, setRoom] = useState("");
   const [peerConnected, setPeerConnected] = useState(false);
   const [received, setReceived] = useState("");
+  const [iceServers, setIceServers] = useState<RTCIceServer[] | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const desiredAction = useRef<RoomAction | null>(null);
@@ -86,6 +87,8 @@ export function useRoomSocket(handlers: RoomSocketHandlers) {
           return;
         }
         const h = handlersRef.current;
+        if ((data.type === "created" || data.type === "joined") && Array.isArray(data.iceServers))
+          setIceServers(data.iceServers);
         if (data.type === "created" && data.room) {
           reconnectAttempts.current = 0;
           setRoom(data.room);
@@ -173,6 +176,7 @@ export function useRoomSocket(handlers: RoomSocketHandlers) {
     room,
     peerConnected,
     received,
+    iceServers,
     create: () => connect({ type: "create" }),
     join: (code: string) => connect({ type: "join", room: code }),
     leave,
