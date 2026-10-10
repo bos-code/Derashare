@@ -29,12 +29,15 @@ export type ServerMessage =
     }
   | { type: "peer"; connected: boolean }
   | { type: "text"; text: string }
+  | { type: "chat"; text: string }
   | { type: "error"; code: ErrorCode; message: string }
   | RtcSignal;
 
 export type RoomAction = { type: "create" } | { type: "join"; room: string };
 
-export type ClientMessage = RoomAction | { type: "text"; text: string } | RtcSignal;
+export type ClientMessage =
+  RoomAction | { type: "text"; text: string } | { type: "chat"; text: string } | RtcSignal;
 
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
 export const MAX_TEXT_LENGTH = 50_000;
+export const MAX_CHAT_LENGTH = 2_000;

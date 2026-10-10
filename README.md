@@ -78,6 +78,7 @@ Without TURN, files only transfer when the two devices can reach each other dire
 - Room codes are short, so the server limits each IP to 15 create/join attempts per minute and each connection to 300 messages per 10 seconds.
 - Text is kept in server memory only while a device is in the room, and is cleared as soon as the room is empty.
 - Files go directly between devices over an encrypted WebRTC data channel and never touch the server.
+- Chat uses the same direct channel when it is open, so the server never sees it. If the direct connection fails, chat is relayed through the server without being stored, and the chat header says "Via server" instead of "Direct".
 - Received files are only previewed when they are a known image type. Everything else is offered as a plain download.
 
 ## Deployment

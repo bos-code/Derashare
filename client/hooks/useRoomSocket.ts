@@ -18,6 +18,7 @@ export type RoomSocketHandlers = {
   onPeer: (connected: boolean) => void;
   onSignal: (signal: RtcSignal) => void;
   onText: (text: string) => void;
+  onChat: (text: string) => void;
   // The socket dropped: tear down the peer connection (a reconnect will negotiate a new one).
   onDisconnect: () => void;
   // The room was left or rejected: also clear any per-room state such as the last transfer.
@@ -104,6 +105,8 @@ export function useRoomSocket(handlers: RoomSocketHandlers) {
         } else if (data.type === "peer") {
           setPeerConnected(Boolean(data.connected));
           h.onPeer(Boolean(data.connected));
+        } else if (data.type === "chat" && typeof data.text === "string") {
+          h.onChat(data.text);
         } else if (data.type === "text" && typeof data.text === "string") {
           setReceived(data.text);
           h.onText(data.text);

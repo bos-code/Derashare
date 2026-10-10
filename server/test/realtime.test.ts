@@ -134,6 +134,28 @@ describe("realtime server", () => {
     assert.equal((await third.next("error")).code, "BAD_ROOM");
   });
 
+  it("relays chat without storing it", async () => {
+    const { url } = await startServer();
+    const { host, room } = await createRoom(url);
+    const guest = await connect(url);
+    send(guest, { type: "join", room });
+    await guest.next("joined");
+    send(guest, { type: "chat", text: "psst" });
+    assert.deepEqual(await host.next("chat"), { type: "chat", text: "psst" });
+
+    // Not kept for devices that join later.
+    guest.close();
+    await host.next("peer");
+    const rejoin = await connect(url);
+    send(rejoin, { type: "join", room });
+    assert.equal((await rejoin.next("joined")).text, "");
+
+    send(rejoin, { type: "chat", text: "   " });
+    assert.equal((await rejoin.next("error")).code, "BAD_TEXT");
+    send(rejoin, { type: "chat", text: "x".repeat(2_001) });
+    assert.equal((await rejoin.next("error")).code, "BAD_TEXT");
+  });
+
   it("validates text and requires a room", async () => {
     const { url } = await startServer();
     const ws = await connect(url);

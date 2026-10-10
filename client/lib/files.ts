@@ -17,6 +17,8 @@ export type Transfer = {
 // Messages sent over the WebRTC data channel alongside the binary chunks.
 export type FileMeta = { kind: "file-meta"; name: string; size: number; fileType: string };
 export type FileEnd = { kind: "file-end" };
+// Chat also rides the data channel when it is open, so the server never sees it.
+export type ChatMessage = { kind: "chat"; text: string };
 
 // Only these image types may be previewed; everything else is stored as an opaque download so a peer
 // can't make the app render HTML/SVG from a same-origin blob: URL.

@@ -3,6 +3,7 @@ import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const MAX_TEXT_LENGTH = 50_000;
+const MAX_CHAT_LENGTH = 2_000;
 
 export type RealtimeOptions = {
   // Frontend origins allowed to connect. Empty allows any origin (local development).
@@ -265,6 +266,25 @@ export function createRealtimeServer(overrides: Partial<RealtimeOptions> = {}): 
       if (!room) return;
       room.latestText = text;
       relay(ws, { type: "text", text });
+      return;
+    }
+    // Chat is relayed to the other device only and never stored, unlike shared text. Clients send it
+    // over the WebRTC data channel when that's open, so this path is only the fallback.
+    if (data.type === "chat") {
+      if (!ws.room) {
+        send(ws, { type: "error", code: "NOT_IN_ROOM", message: "Join a room before chatting." });
+        return;
+      }
+      const text = typeof data.text === "string" ? data.text : "";
+      if (!text.trim() || text.length > MAX_CHAT_LENGTH) {
+        send(ws, {
+          type: "error",
+          code: "BAD_TEXT",
+          message: "Chat messages must be between 1 and 2,000 characters.",
+        });
+        return;
+      }
+      relay(ws, { type: "chat", text });
       return;
     }
     if (["rtc-offer", "rtc-answer", "rtc-ice"].includes(data.type)) {

@@ -3,11 +3,12 @@ import {
   CHUNK_SIZE,
   MAX_FILE_SIZE,
   safeFileType,
+  type ChatMessage,
   type FileEnd,
   type FileMeta,
   type Transfer,
 } from "@/lib/files";
-import type { ClientMessage, RtcSignal } from "@/lib/protocol";
+import { MAX_CHAT_LENGTH, type ClientMessage, type RtcSignal } from "@/lib/protocol";
 
 // Used until the server sends its own list (which may include TURN relays).
 const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
@@ -35,12 +36,13 @@ type Options = {
   iceServers: RTCIceServer[] | null;
   sendSignal: (message: ClientMessage) => void;
   notify: (message: string) => void;
+  onChat: (text: string) => void;
   onError: (message: string) => void;
 };
 
 // WebRTC data channel used to send files directly between the two devices. The device that sees the
 // other one arrive makes the offer; signalling goes through the realtime server.
-export function usePeerTransfer({ iceServers, sendSignal, notify, onError }: Options) {
+export function usePeerTransfer({ iceServers, sendSignal, notify, onChat, onError }: Options) {
   const [rtcReady, setRtcReady] = useState(false);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   // The peer is present but a direct (or relayed) connection could not be established.
@@ -52,8 +54,8 @@ export function usePeerTransfer({ iceServers, sendSignal, notify, onError }: Opt
   const incoming = useRef<Incoming>({ chunks: [], received: 0 });
   const sendChain = useRef<Promise<void>>(Promise.resolve());
   const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const optionsRef = useRef({ iceServers, sendSignal, notify, onError });
-  optionsRef.current = { iceServers, sendSignal, notify, onError };
+  const optionsRef = useRef({ iceServers, sendSignal, notify, onChat, onError });
+  optionsRef.current = { iceServers, sendSignal, notify, onChat, onError };
   const urls = useRef(new Set<string>());
 
   // Newest first. Blob URLs of transfers that fall off the end are revoked.
@@ -118,10 +120,17 @@ export function usePeerTransfer({ iceServers, sendSignal, notify, onError }: Opt
         return;
       }
 
-      let msg: Partial<FileMeta> | Partial<FileEnd> | null;
+      let msg: Partial<FileMeta> | Partial<FileEnd> | Partial<ChatMessage> | null;
       try {
         msg = JSON.parse(e.data);
       } catch {
+        return;
+      }
+
+      // Chat can arrive between the chunks of a file; it doesn't touch the incoming file state.
+      if (msg?.kind === "chat") {
+        if (typeof msg.text === "string" && msg.text.trim())
+          optionsRef.current.onChat(msg.text.slice(0, MAX_CHAT_LENGTH));
         return;
       }
 
@@ -328,6 +337,19 @@ export function usePeerTransfer({ iceServers, sendSignal, notify, onError }: Opt
     [updateTransfer],
   );
 
+  // Returns false when the data channel isn't open, so the caller can fall back to the server.
+  const sendChat = useCallback((text: string) => {
+    const ch = channelRef.current;
+    if (!ch || ch.readyState !== "open") return false;
+    const message: ChatMessage = { kind: "chat", text };
+    try {
+      ch.send(JSON.stringify(message));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   // Files are sent one at a time so their chunks can't interleave on the channel.
   const sendFiles = useCallback(
     (files: FileList | null | undefined) => {
@@ -368,6 +390,7 @@ export function usePeerTransfer({ iceServers, sendSignal, notify, onError }: Opt
     transfers,
     clearTransfers,
     sendFiles,
+    sendChat,
     onPeer,
     handleSignal,
     close,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ChatBox } from "@/components/ChatBox";
 import { FileDrop } from "@/components/FileDrop";
 import { InviteCard } from "@/components/InviteCard";
 import { JoinPanel } from "@/components/JoinPanel";
@@ -9,6 +10,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TextHistory } from "@/components/TextHistory";
 import { TextShare } from "@/components/TextShare";
 import { TransferList } from "@/components/TransferList";
+import { useChat } from "@/hooks/useChat";
 import { useNotify } from "@/hooks/useNotify";
 import { usePeerTransfer } from "@/hooks/usePeerTransfer";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
@@ -23,6 +25,7 @@ export default function Home() {
   const { dark, toggleTheme } = useTheme();
   const { toast, notify, enableNotifications } = useNotify();
   const history = useTextHistory();
+  const chat = useChat();
 
   // The two hooks call into each other: the socket relays WebRTC signals to the peer connection,
   // and the peer connection sends its signals back out over the socket. The handlers below only
@@ -35,9 +38,11 @@ export default function Home() {
       notify("New text received");
     },
     onDisconnect: () => peer.close(),
+    onChat: (text) => chat.add(false, text),
     onLeave: () => {
       peer.reset();
       history.clear();
+      chat.clear();
     },
     onError: setError,
   });
@@ -45,6 +50,7 @@ export default function Home() {
     iceServers: socket.iceServers,
     sendSignal: socket.send,
     notify,
+    onChat: (text) => chat.add(false, text),
     onError: setError,
   });
 
@@ -78,6 +84,13 @@ export default function Home() {
     history.add("sent", text);
     setSharedText("");
     notify("Text sent");
+    return true;
+  };
+
+  // Prefer the direct data channel so the server never sees chat; fall back to the server relay.
+  const sendChat = (text: string) => {
+    if (!peer.sendChat(text) && !socket.send({ type: "chat", text })) return false;
+    chat.add(true, text);
     return true;
   };
 
@@ -155,6 +168,17 @@ export default function Home() {
             </div>
           )}
           {toast && <div className="toast">{toast}</div>}
+          {room && (
+            <ChatBox
+              messages={chat.messages}
+              open={chat.open}
+              unread={chat.unread}
+              canSend={peerConnected && status === "connected"}
+              direct={peer.rtcReady}
+              onOpenChange={chat.setOpen}
+              onSend={sendChat}
+            />
+          )}
         </div>
       </section>
     </main>
